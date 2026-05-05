@@ -1,102 +1,101 @@
 import streamlit as st
 import pandas as pd
 from Bio import Entrez
-import feedparser
 import datetime
-import urllib.parse
 
 # --- 1. ページ設定 ---
-st.set_page_config(page_title="Urology Web Spider", layout="wide")
-st.title("🕸️ 泌尿器科ウェブ・スパイダー (特化型検索エンジン)")
+st.set_page_config(page_title="Urology Intel Sniper", layout="wide")
+st.title("🎯 泌尿器科インテリジェンス・スナイパー (Precision Mode)")
 
-# --- 2. 監視対象のデータソース（完全無料のRSSフィード） ---
-# ※ここに学会や主要ジャーナルのRSS URLを登録します
-SOURCES = {
-    "Urology Times": "https://www.urologytimes.com/rss",
-    "European Urology (Current Issue)": "https://www.europeanurology.com/current.rss",
-    "Journal of Urology": "https://www.auajournals.org/action/showFeed?type=etoc&feed=rss&jc=juro"
+# --- 2. 高度な検索式（Sniper Queries） ---
+# ※ノイズを排除し、Coreな論文だけを狙い撃ちする検索式
+SNIPER_QUERIES = {
+    "【Project SUI】 吸引機能付き尿管アクセスシース": 
+        '("ureteral access sheath"[Title/Abstract] AND (suction OR vacuum OR "negative pressure"))',
+    
+    "【癌・腫瘍】 UTUC (上部尿路尿路上皮癌) の最新外科治療": 
+        '("upper tract urothelial carcinoma"[Title/Abstract] OR UTUC[Title/Abstract]) AND (surgery OR consolidative OR nephroureterectomy)',
+    
+    "【レーザー工学】 ツリウム/ホルミウムレーザー砕石術": 
+        '(lithotripsy[Title/Abstract]) AND (thulium OR holmium OR "Revolix" OR "super thulium")',
+    
+    "【統計手法】 泌尿器科におけるROC分析 / PSM": 
+        '("urology"[Journal] OR "european urology"[Journal]) AND ("propensity score" OR "ROC")'
 }
 
-# --- 3. クローラー関数 ---
-@st.cache_data(ttl=3600) # 1時間はキャッシュを保持して高速化
-def crawl_web_news():
-    news_list = []
-    for source_name, url in SOURCES.items():
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:5]: # 各サイト最新5件
-                news_list.append({
-                    "Date": getattr(entry, 'published', datetime.date.today().strftime("%Y-%m-%d")),
-                    "Source": source_name,
-                    "Title": entry.title,
-                    "Link": entry.link
-                })
-        except Exception as e:
-            pass # エラーが出たサイトはスキップ
-    return news_list
-
+# --- 3. スナイパー検索関数 ---
 @st.cache_data(ttl=3600)
-def search_pubmed(query):
-    Entrez.email = "spider@example.com"
-    full_query = f"({query}) AND (2025:2026[pdat])"
+def pubmed_sniper(query_key, max_results=10):
+    Entrez.email = "sniper@example.com"
+    base_query = SNIPER_QUERIES[query_key]
+    
+    # 2025年以降の論文に限定してさらに絞り込む
+    full_query = f"({base_query}) AND (2025:2026[pdat])"
+    
     try:
-        handle = Entrez.esearch(db="pubmed", term=full_query, retmax=10, sort="date")
+        handle = Entrez.esearch(db="pubmed", term=full_query, retmax=max_results, sort="date")
         ids = Entrez.read(handle)["IdList"]
         
+        if not ids:
+            return []
+
         results = []
         for pmid in ids:
             summary = Entrez.read(Entrez.esummary(db="pubmed", id=pmid))[0]
+            
+            # Abstract（抄録）を取得するための追加リクエスト
+            fetch_handle = Entrez.efetch(db="pubmed", id=pmid, retmode="xml")
+            fetch_records = Entrez.read(fetch_handle)
+            abstract_text = "Abstract not available."
+            
+            try:
+                article = fetch_records['PubmedArticle'][0]['MedlineCitation']['Article']
+                if 'Abstract' in article and 'AbstractText' in article['Abstract']:
+                    # Abstractが複数段落に分かれている場合を結合
+                    abstract_text = " ".join([str(text) for text in article['Abstract']['AbstractText']])
+            except:
+                pass
+
             results.append({
-                "Date": summary.get('PubDate', ''),
-                "Source": "PubMed",
-                "Title": summary.get('Title', ''),
+                "Date": summary.get('PubDate', 'N/A'),
+                "Journal": summary.get('Source', 'N/A'),
+                "Title": summary.get('Title', 'N/A'),
+                "Abstract": abstract_text,
+                "PMID": pmid,
                 "Link": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
             })
         return results
-    except:
+    except Exception as e:
+        st.error(f"PubMed検索中にエラーが発生しました: {e}")
         return []
 
 # --- 4. UI構成 ---
-st.markdown("API課金なし。Web上の最新ジャーナルと論文をクローリングする独自検索エンジンです。")
+st.markdown("API課金ゼロ。ノイズを排除し、研究テーマに直結するPubMed論文のAbstract（抄録）まで直接狙い撃ちします。")
 
-# 検索インターフェース
-search_query = st.text_input("🔍 検索キーワードを入力 (例: UTUC, laser lithotripsy, ureteral access sheath)", "UTUC OR laser lithotripsy")
+selected_theme = st.selectbox("🎯 ターゲット領域を選択", list(SNIPER_QUERIES.keys()))
+fetch_count = st.slider("取得件数", min_value=5, max_value=20, value=5)
 
-if st.button("Web全域をスキャン"):
-    with st.spinner("クローラーがWeb上を巡回中..."):
-        # 1. ニュースサイトのクローリング
-        news_data = crawl_web_news()
+if st.button("狙撃開始 (PubMed検索)"):
+    with st.spinner("PubMedから高精度データを抽出中..."):
+        st.session_state.sniper_results = pubmed_sniper(selected_theme, fetch_count)
         
-        # 2. PubMedのクローリング
-        pubmed_data = search_pubmed(search_query)
-        
-        # 3. データの結合と検索キーワードでのフィルタリング
-        all_data = news_data + pubmed_data
-        
-        # キーワードが指定されている場合、タイトルにその文字が含まれるか（簡易的な全文検索）
-        filtered_results = []
-        query_words = search_query.lower().replace(' or ', ' ').replace(' and ', ' ').split()
-        
-        for item in all_data:
-            title_lower = item['Title'].lower()
-            # 簡易検索ロジック：キーワードのいずれかが含まれていればヒット
-            if any(word in title_lower for word in query_words) or not query_words:
-                filtered_results.append(item)
-                
-        st.session_state.search_results = filtered_results
-        st.success(f"スキャン完了。関連情報が {len(filtered_results)} 件見つかりました。")
+        if st.session_state.sniper_results:
+            st.success(f"標的を {len(st.session_state.sniper_results)} 件捕捉しました。")
+        else:
+            st.warning("指定の条件で2025年以降の最新論文は見つかりませんでした。")
 
-# 検索結果の表示
-if 'search_results' in st.session_state and st.session_state.search_results:
-    # データをPandas DataFrameにして綺麗な表にする
-    df = pd.DataFrame(st.session_state.search_results)
-    
-    # URLをクリッカブルなリンクに変換する設定
-    st.data_editor(
-        df,
-        column_config={
-            "Link": st.column_config.LinkColumn("Read Article", display_text="Open Link")
-        },
-        hide_index=True,
-        use_container_width=True
-    )
+# 結果の表示
+if 'sniper_results' in st.session_state and st.session_state.sniper_results:
+    for i, res in enumerate(st.session_state.sniper_results):
+        with st.container():
+            st.markdown(f"### {res['Title']}")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.caption(f"**Journal:** {res['Journal']} | **Date:** {res['Date']} | **PMID:** {res['PMID']}")
+            with col2:
+                st.markdown(f"[🔗 PubMedで開く]({res['Link']})")
+            
+            # Abstractをデフォルトで表示する（展開ボックス）
+            with st.expander("📝 抄録 (Abstract) を読む", expanded=False):
+                st.write(res['Abstract'])
+            st.divider()
