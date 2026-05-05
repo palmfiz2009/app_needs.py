@@ -89,6 +89,20 @@ with tab1:
         st.subheader("🔍 蓄積されたニーズ一覧")
         st.dataframe(load_data(), use_container_width=True)
 
+def load_data():
+    # 2026年現在の最新の列構成
+    columns = ['Date', 'Category', 'Medical_Need', 'Engineering_Spec', 'Source']
+    
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+        # もし古いCSVに 'Source' 列がなければ、空の列を追加して補完する
+        for col in columns:
+            if col not in df.columns:
+                df[col] = "N/A"  # 存在しない列を自動作成
+        return df[columns]  # 列の順番を整えて返す
+    
+    return pd.DataFrame(columns=columns)
+
 # --- 修正版：Tab 2 (Web知識の収集) ---
 with tab2:
     st.subheader("🌐 最新知見のバルク収集")
