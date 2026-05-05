@@ -3,26 +3,22 @@ import pandas as pd
 import google.generativeai as genai
 from Bio import Entrez
 import datetime
+import time  # 💡 待機ロジックのために追加
 
 # --- 1. ページ設定とAPI準備 ---
 st.set_page_config(page_title="Urology Intel & IP Analyzer", layout="wide")
 st.title("🎯 泌尿器科インテリジェンス ＆ 知財アナライザー")
 
-# Gemini APIの初期化（動的モデル取得：絶対に404エラーを出さない設計）
+# Gemini APIの初期化
 model = None
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     try:
-        # Googleのサーバーに「現在使えるモデル」のリストを要求
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
         if available_models:
-            # flashが含まれるものを優先、なければpro、それでもなければリストの最初を選択
             target_model_name = next((m for m in available_models if "flash" in m), None)
             if not target_model_name:
                 target_model_name = next((m for m in available_models if "pro" in m), available_models[0])
-            
-            # 自動取得した確実な名前でモデルをセット
             model = genai.GenerativeModel(target_model_name)
         else:
             st.error("利用可能なモデルが見つかりません。")
@@ -58,7 +54,6 @@ def pubmed_sniper(query_key, max_results=5):
         for pmid in ids:
             summary = Entrez.read(Entrez.esummary(db="pubmed", id=pmid))[0]
             
-            # Abstract取得
             fetch_handle = Entrez.efetch(db="pubmed", id=pmid, retmode="xml")
             fetch_records = Entrez.read(fetch_handle)
             abstract_text = "Abstract not available."
@@ -79,7 +74,7 @@ def pubmed_sniper(query_key, max_results=5):
         st.error(f"PubMed検索エラー: {e}")
         return []
 
-# --- 3. 知財・アンメットニーズ抽出エンジン（Gemini） ---
+# --- 3. 知財・アンメットニーズ抽出エンジン（自動回復機能付き） ---
 def analyze_unmet_needs(abstracts_text, theme):
     if not model:
         return "エラー: AIモデルが正常に読み込まれていません。"
@@ -96,11 +91,25 @@ def analyze_unmet_needs(abstracts_text, theme):
     2. 工学的ボトルネック (PhD視点：なぜ他社はそれを解決できていないのか)
     3. 商業化・特許の「ホワイトスペース」 (知財戦略：どのような構造やメソッドで特許を押さえるべきか、キラーフレーズは何か)
     """
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Gemini解析エラー: {e}"
+    
+    # 💡 最大3回まで自動で再挑戦するロジック
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            error_msg = str(e)
+            # 429エラー（制限）が出た場合、自動で待機して再挑戦
+            if "429" in error_msg or "quota" in error_msg.lower():
+                if attempt < max_retries - 1:
+                    wait_time = 40 # 40秒待機
+                    st.warning(f"⏳ APIの速度制限を検知しました。AIが{wait_time}秒間クールダウンした後、自動で再抽出を行います... (試行 {attempt+1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+            return f"Gemini解析エラー: {e}"
+            
+    return "規定の回数待機しましたが、現在AIサーバーが混み合っているようです。少し時間を置いてから再度お試しください。"
 
 # --- 4. UI構成 ---
 tab1, tab2 = st.tabs(["🎯 PubMed スナイパー検索", "🧠 知財・アンメットニーズ抽出"])
@@ -127,11 +136,9 @@ with tab2:
     
     if 'sniper_data' in st.session_state and st.session_state.sniper_data:
         if st.button("✨ 取得したデータからアンメットニーズを抽出"):
-            with st.spinner("MD-PhD視点で知財戦略を構築中..."):
-                # 取得したすべてのAbstractを1つのテキストに結合
+            with st.spinner("MD-PhD視点で知財戦略を構築中...（少し時間がかかります）"):
                 combined_abstracts = "\n\n".join([f"Title: {d['Title']}\nAbstract: {d['Abstract']}" for d in st.session_state.sniper_data])
                 
-                # Geminiに解析させる
                 analysis_result = analyze_unmet_needs(combined_abstracts, selected_theme)
                 
                 st.markdown("### 💡 事業化インテリジェンス・レポート")
