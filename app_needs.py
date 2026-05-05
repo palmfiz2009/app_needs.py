@@ -8,14 +8,15 @@ import datetime
 st.set_page_config(page_title="Urology Intel & IP Analyzer", layout="wide")
 st.title("🎯 泌尿器科インテリジェンス ＆ 知財アナライザー")
 
-# Gemini APIの初期化（OpenAIは完全に排除）
+# Gemini APIの初期化（最も安定している 'gemini-pro' に変更）
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 💡 確実につながる標準モデルに変更
+    model = genai.GenerativeModel('gemini-pro')
 else:
     st.error("Gemini API Key が設定されていません。")
 
-# --- 2. スナイパー検索関数（前回の高精度検索） ---
+# --- 2. スナイパー検索関数 ---
 SNIPER_QUERIES = {
     "【Project SUI】 吸引機能付き尿管アクセスシース": 
         '("ureteral access sheath"[Title/Abstract] AND (suction OR vacuum OR "negative pressure"))',
