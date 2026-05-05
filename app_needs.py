@@ -9,7 +9,7 @@ import google.generativeai as genai
 st.set_page_config(page_title="MedTech Needs Tracker", layout="wide")
 
 # --- 2. API・ファイル設定 ---
-Entrez.email = "t-yoshida@kmu.ac.jp" 
+Entrez.email = "yoshida.tks@kmu.ac.jp" 
 
 # APIキーをSecretsから読み込む
 if "GEMINI_API_KEY" in st.secrets:
@@ -17,8 +17,11 @@ if "GEMINI_API_KEY" in st.secrets:
 else:
     st.error("エラー: Streamlit Cloudの Settings -> Secrets に GEMINI_API_KEY を設定してください。")
 
-# ★ここが重要！ 古い 'gemini-pro' を最新の 'gemini-1.5-flash' に変更します
-model = genai.GenerativeModel('gemini-1.5-flash')
+# # --- 修正前 ---
+# model = genai.GenerativeModel('gemini-1.5-flash') 
+
+# --- 修正後：2026年現在の標準モデル名に更新 ---
+model = genai.GenerativeModel('gemini-3-flash')
 
 DATA_FILE = 'medical_needs_data.csv'
 
