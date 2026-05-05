@@ -8,11 +8,26 @@ import datetime
 st.set_page_config(page_title="Urology Intel & IP Analyzer", layout="wide")
 st.title("🎯 泌尿器科インテリジェンス ＆ 知財アナライザー")
 
-# Gemini APIの初期化（最も安定している 'gemini-pro' に変更）
+# Gemini APIの初期化（動的モデル取得：絶対に404エラーを出さない設計）
+model = None
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    # 💡 確実につながる標準モデルに変更
-    model = genai.GenerativeModel('gemini-pro')
+    try:
+        # Googleのサーバーに「現在使えるモデル」のリストを要求
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        if available_models:
+            # flashが含まれるものを優先、なければpro、それでもなければリストの最初を選択
+            target_model_name = next((m for m in available_models if "flash" in m), None)
+            if not target_model_name:
+                target_model_name = next((m for m in available_models if "pro" in m), available_models[0])
+            
+            # 自動取得した確実な名前でモデルをセット
+            model = genai.GenerativeModel(target_model_name)
+        else:
+            st.error("利用可能なモデルが見つかりません。")
+    except Exception as e:
+        st.error(f"モデルリスト取得エラー: {e}")
 else:
     st.error("Gemini API Key が設定されていません。")
 
@@ -66,6 +81,9 @@ def pubmed_sniper(query_key, max_results=5):
 
 # --- 3. 知財・アンメットニーズ抽出エンジン（Gemini） ---
 def analyze_unmet_needs(abstracts_text, theme):
+    if not model:
+        return "エラー: AIモデルが正常に読み込まれていません。"
+        
     prompt = f"""
     あなたは泌尿器科医(MD)かつ工学博士(PhD)の知財戦略コンサルタントです。
     以下の最新論文(Abstract)群を読み込み、テーマ「{theme}」に関する事業化・特許化のためのインテリジェンスを抽出してください。
