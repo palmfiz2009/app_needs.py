@@ -89,40 +89,56 @@ with tab1:
         st.subheader("🔍 蓄積されたニーズ一覧")
         st.dataframe(load_data(), use_container_width=True)
 
-# --- Tab 2: Web知識の「ざっと」収集 ---
+# --- 修正版：Tab 2 (Web知識の収集) ---
 with tab2:
     st.subheader("🌐 最新知見のバルク収集")
-    search_q = st.text_input("検索キーワード（例: Ureteral access sheath suction camera）")
+    search_q = st.text_input("検索キーワード", value="Ureteral access sheath suction")
+    
+    # 検索結果を保持するための「記憶スペース」を準備
+    if 'search_results' not in st.session_state:
+        st.session_state.search_results = []
+
     if st.button("最新論文・技術トレンドを解析"):
-        with st.spinner("AIがPubMedと最新トレンドを解析中..."):
-            collected_info = fetch_and_analyze(search_q)
-            for info in collected_info:
+        with st.spinner("AIが解析中..."):
+            # 検索結果を「記憶スペース」に保存
+            st.session_state.search_results = fetch_and_analyze(search_q)
+
+    # 記憶スペースにデータがある場合のみ表示
+    if st.session_state.search_results:
+        for i, info in enumerate(st.session_state.search_results):
+            with st.container():
                 st.info(f"**{info['Medical_Need']}**")
                 st.write(info['Engineering_Spec'])
-                if st.button(f"これを保存: {info['Source'][:10]}", key=info['Source']):
-                    df = pd.concat([load_data(), pd.DataFrame([info])], ignore_index=True)
-                    save_data(df)
-                    st.toast("保存しました！")
+                
+                # keyに番号(i)を振ることで、ボタンの押し間違いを防ぐ
+                if st.button(f"これを保存する", key=f"save_{i}"):
+                    current_df = load_data()
+                    # 重複チェック（同じ論文を何度も保存しない）
+                    if not (current_df['Source'] == info['Source']).any():
+                        new_df = pd.concat([current_df, pd.DataFrame([info])], ignore_index=True)
+                        save_data(new_df)
+                        st.success(f"「{info['Source']}」をデータベースに保存しました！")
+                    else:
+                        st.warning("この情報はすでに保存されています。")
+                st.divider()
 
-# --- Tab 3: AI知財コンサル（ぱっと引き出す） ---
+# --- 修正版：Tab 3 (AI知財コンサル) ---
 with tab3:
     st.subheader("🤖 AI知財壁打ちモード")
-    st.write("これまでに蓄積したデータに基づいて、AIが開発のアドバイスをします。")
     
-    knowledge_base = load_data().to_string()
-    user_q = st.text_input("質問例：ワイヤー屈曲固定のアイデアについて、過去のメモと似た論文はあった？")
+    # データベースの最新状態を反映させる
+    df_for_consult = load_data()
     
-    if user_q:
-        consult_prompt = f"""
-        あなたは医療機器開発の弁理士かつ工学博士です。
-        以下の知識ベースを元に、ユーザーの質問に答えてください。
+    if df_for_consult.empty:
+        st.warning("データベースが空です。Tab 1 か Tab 2 で情報を蓄積してください。")
+    else:
+        st.write(f"現在、{len(df_for_consult)} 件の知見に基づいたアドバイスが可能です。")
+        knowledge_base = df_for_consult.to_string()
         
-        【知識ベース】
-        {knowledge_base}
+        user_q = st.text_input("質問例：Project SUIの屈曲固定について、過去のデータから課題を教えて")
         
-        【質問】
-        {user_q}
-        """
-        with st.spinner("思考中..."):
-            answer = model.generate_content(consult_prompt)
-            st.markdown(f"### AIのアドバイス\n{answer.text}")
+        if user_q:
+            consult_prompt = f"以下の知識ベースを元に回答してください。\n\n{knowledge_base}\n\n質問：{user_q}"
+            with st.spinner("思考中..."):
+                answer = model.generate_content(consult_prompt)
+                st.markdown(f"### AIのアドバイス\n{answer.text}")
