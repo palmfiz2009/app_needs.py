@@ -9,16 +9,15 @@ import google.generativeai as genai
 st.set_page_config(page_title="MedTech Needs Tracker", layout="wide")
 
 # --- 2. API・ファイル設定 ---
-# Entrezのメールアドレスはご自身のものに書き換えてください（適当でも動くことは多いですが、本来は必要です）
 Entrez.email = "t-yoshida@kmu.ac.jp" 
 
-# ★APIキーを直接書かず、StreamlitのSecretsから読み込む安全な方法
+# APIキーをSecretsから読み込む
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     st.error("エラー: Streamlit Cloudの Settings -> Secrets に GEMINI_API_KEY を設定してください。")
 
-# モデルを最新で高速なものに変更
+# ★ここが重要！ 古い 'gemini-pro' を最新の 'gemini-1.5-flash' に変更します
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 DATA_FILE = 'medical_needs_data.csv'
