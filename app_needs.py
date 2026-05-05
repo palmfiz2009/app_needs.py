@@ -1,150 +1,128 @@
 import streamlit as st
 import pandas as pd
-import os
-from datetime import datetime
-from Bio import Entrez
 import google.generativeai as genai
+from Bio import Entrez
+import datetime
+import os
 
-# --- 1. アプリ全体の初期設定（一番上に書く必要があります） ---
-st.set_page_config(page_title="MedTech Needs Tracker", layout="wide")
+# --- 1. ページ設定 ---
+st.set_page_config(page_title="MedTech IP-Engine", layout="wide")
+st.title("🚀 医学×工学 知財統合プラットフォーム (v2.0)")
 
-# --- 2. API・ファイル設定 ---
-Entrez.email = "yoshida.tks@kmu.ac.jp" 
-
-# --- 2. API・ファイル設定 ---
+# --- 2. API・モデル自動選択設定 ---
 Entrez.email = "t-yoshida@kmu.ac.jp" 
 
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("エラー: Streamlit Cloudの Settings -> Secrets に GEMINI_API_KEY を設定してください。")
+    st.error("Secretsに GEMINI_API_KEY を設定してください。")
 
-# ★モデル名を推測するのをやめ、サーバーから自動取得する★
-try:
-    # 現在のAPIキーで利用可能な（文章生成ができる）全モデルのリストを取得
-    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    
-    if available_models:
-        # 高速な 'flash' モデルがあればそれを優先、なければリストの先頭を使う
-        target_model_name = next((m for m in available_models if "flash" in m), available_models[0])
-        model = genai.GenerativeModel(target_model_name)
-    else:
-        st.error("このAPIキーで利用可能なAIモデルが見つかりません。")
-except Exception as e:
-    st.error(f"AIサーバーへの接続エラーが発生しました: {e}")
+@st.cache_resource
+def get_ai_model():
+    try:
+        # 稼働中の最新モデルを自動検知
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        target = next((m for m in available_models if "flash" in m), available_models[0])
+        return genai.GenerativeModel(target)
+    except:
+        return genai.GenerativeModel('gemini-1.5-flash')
 
+model = get_ai_model()
 DATA_FILE = 'medical_needs_data.csv'
 
-# AIからのコピー用セッション状態
-if 'draft_need' not in st.session_state:
-    st.session_state.draft_need = ""
-if 'draft_spec' not in st.session_state:
-    st.session_state.draft_spec = ""
-
-# --- 3. 共通関数（データの読み書き・検索・AI解析） ---
+# --- 3. データ管理関数 ---
 def load_data():
     if os.path.exists(DATA_FILE):
         return pd.read_csv(DATA_FILE)
-    return pd.DataFrame(columns=['Date', 'Category', 'Medical_Need', 'Engineering_Spec', 'Patent_Info', 'Importance'])
+    return pd.DataFrame(columns=['Date', 'Category', 'Medical_Need', 'Engineering_Spec', 'Source'])
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
-def search_pubmed(keyword, max_results=3):
-    handle = Entrez.esearch(db="pubmed", term=keyword, retmax=max_results)
+# --- 4. 知識収集ロジック (PubMed + AI) ---
+def fetch_and_analyze(query):
+    handle = Entrez.esearch(db="pubmed", term=query, retmax=5)
     record = Entrez.read(handle)
-    handle.close()
     ids = record["IdList"]
-    abstracts = []
+    
+    results = []
     for pmid in ids:
-        fetch_handle = Entrez.efetch(db="pubmed", id=pmid, rettype="abstract", retmode="text")
-        abstract_text = fetch_handle.read()
-        fetch_handle.close()
-        abstracts.append({"pmid": pmid, "text": abstract_text})
-    return abstracts
+        summary_handle = Entrez.esummary(db="pubmed", id=pmid)
+        summary = Entrez.read(summary_handle)
+        title = summary[0]['Title']
+        
+        # AIによる「工学的課題」の抽出
+        prompt = f"""
+        以下の論文タイトルから、泌尿器科デバイス開発（特に吸引・屈曲・カメラ統合）に関する
+        1.未解決の医学的ニーズ 2.必要な工学的仕様 を専門的に抽出してください。
+        論文名: {title}
+        """
+        response = model.generate_content(prompt)
+        results.append({
+            'Date': datetime.date.today(),
+            'Category': 'AI収集(PubMed)',
+            'Medical_Need': title,
+            'Engineering_Spec': response.text,
+            'Source': f"PMID: {pmid}"
+        })
+    return results
 
-def extract_needs_with_ai(abstract_dict):
-    prompt = f"""
-    以下の抄録を読み、医学的ニーズと工学的課題を事実のみ抽出してください。
-    絶対に自分の知識で補完せず、テキストにある内容のみを反映させてください。
-    論文(PMID: {abstract_dict['pmid']}):
-    {abstract_dict['text']}
-    """
-    response = model.generate_content(prompt)
-    return response.text
+# --- 5. UI（タブ構成） ---
+tab1, tab2, tab3 = st.tabs(["基本データベース", "Web・論文インテリジェンス", "AI知財コンサル"])
 
-# --- 4. メイン画面のUI構成 ---
-st.title("🏥 医学×工学ニーズ・知財統合プラットフォーム")
-
-# タブで機能を分ける（画面を整理するため）
-tab1, tab2 = st.tabs(["📊 データベース & 本登録", "🤖 AIニーズ検索（PubMed）"])
-
-# --- Tab 1: 蓄積データ表示 & 手動登録（編集） ---
+# --- Tab 1: 現場の知見を登録 ---
 with tab1:
     col1, col2 = st.columns([1, 2])
-    
     with col1:
-        st.subheader("📌 現場の知見を登録")
-        # AIからの下書きがある場合は、ここに反映される
-        with st.form("input_form", clear_on_submit=True):
-            category = st.selectbox("カテゴリー", ["泌尿器科", "結石破砕", "腫瘍（UTUC等）", "手術器具", "その他"])
-            
-            # session_stateを使ってAIの結果を表示
-            need = st.text_area("医学的ニーズ（現場の感覚を追記してください）", value=st.session_state.draft_need)
-            spec = st.text_area("工学的仕様（数値・物理的構造など）", value=st.session_state.draft_spec)
-            
-            patent = st.text_input("特許情報・関連技術")
-            imp = st.slider("重要度（切実さ）", 1, 5, 3)
-            
-            if st.form_submit_button("本登録する"):
-                new_row = {
-                    'Date': datetime.now().strftime("%Y-%m-%d"),
-                    'Category': category,
-                    'Medical_Need': need,
-                    'Engineering_Spec': spec,
-                    'Patent_Info': patent,
-                    'Importance': imp
-                }
-                df = load_data()
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                save_data(df)
-                # 登録後は下書きをリセット
-                st.session_state.draft_need = ""
-                st.session_state.draft_spec = ""
-                st.success("本登録完了！データが保存されました。")
-                st.rerun()
-
+        st.subheader("📌 現場の気づきを登録")
+        cat = st.selectbox("カテゴリー", ["泌尿器科", "手術支援ロボット", "内視鏡装置", "その他"])
+        need = st.text_area("医学的ニーズ（ボヤキ・不満）")
+        spec = st.text_area("工学的仕様（アイデア・数値）")
+        if st.button("データベースに本登録"):
+            new_data = pd.DataFrame([[datetime.date.today(), cat, need, spec, "Manual"]], 
+                                    columns=load_data().columns)
+            df = pd.concat([load_data(), new_data], ignore_index=True)
+            save_data(df)
+            st.success("登録完了！")
+    
     with col2:
         st.subheader("🔍 蓄積されたニーズ一覧")
-        df_display = load_data()
-        if not df_display.empty:
-            st.dataframe(df_display.sort_values(by='Date', ascending=False), use_container_width=True)
-        else:
-            st.info("データがまだありません。")
+        st.dataframe(load_data(), use_container_width=True)
 
-# --- Tab 2: AIによる論文解析 & 下書き生成 ---
+# --- Tab 2: Web知識の「ざっと」収集 ---
 with tab2:
-    st.subheader("🌐 最新論文からニーズの「種」を探す")
-    search_keyword = st.text_input("PubMed検索キーワード（英語）", "Ureteral access sheath suction")
-    
-    if st.button("AIで検索・解析を実行"):
-        if search_keyword:
-            with st.spinner("PubMedを検索中..."):
-                results = search_pubmed(search_keyword)
-                for item in results:
-                    with st.expander(f"📄 論文 PMID: {item['pmid']} のAI解析結果"):
-                        analysis = extract_needs_with_ai(item)
-                        st.write(analysis)
-                        
-                        # ボタンを押すとTab 1のフォームにデータが飛ぶ
-                        if st.button(f"この内容を編集して登録する (PMID:{item['pmid']})"):
-                            st.session_state.draft_need = f"【PMID:{item['pmid']}より】\n" + analysis
-                            st.session_state.draft_spec = "（ここに先生の工学的知見を追記してください）"
-                            st.success("Tab 1 の登録フォームに下書きをコピーしました！")
-                        
-                        st.caption(f"[PubMedで原文を確認](https://pubmed.ncbi.nlm.nih.gov/{item['pmid']}/)")
-        else:
-            st.warning("キーワードを入力してください。")
+    st.subheader("🌐 最新知見のバルク収集")
+    search_q = st.text_input("検索キーワード（例: Ureteral access sheath suction camera）")
+    if st.button("最新論文・技術トレンドを解析"):
+        with st.spinner("AIがPubMedと最新トレンドを解析中..."):
+            collected_info = fetch_and_analyze(search_q)
+            for info in collected_info:
+                st.info(f"**{info['Medical_Need']}**")
+                st.write(info['Engineering_Spec'])
+                if st.button(f"これを保存: {info['Source'][:10]}", key=info['Source']):
+                    df = pd.concat([load_data(), pd.DataFrame([info])], ignore_index=True)
+                    save_data(df)
+                    st.toast("保存しました！")
 
-st.markdown("---")
-st.caption("Developed for MD-PhD Professional Workflow")
+# --- Tab 3: AI知財コンサル（ぱっと引き出す） ---
+with tab3:
+    st.subheader("🤖 AI知財壁打ちモード")
+    st.write("これまでに蓄積したデータに基づいて、AIが開発のアドバイスをします。")
+    
+    knowledge_base = load_data().to_string()
+    user_q = st.text_input("質問例：ワイヤー屈曲固定のアイデアについて、過去のメモと似た論文はあった？")
+    
+    if user_q:
+        consult_prompt = f"""
+        あなたは医療機器開発の弁理士かつ工学博士です。
+        以下の知識ベースを元に、ユーザーの質問に答えてください。
+        
+        【知識ベース】
+        {knowledge_base}
+        
+        【質問】
+        {user_q}
+        """
+        with st.spinner("思考中..."):
+            answer = model.generate_content(consult_prompt)
+            st.markdown(f"### AIのアドバイス\n{answer.text}")
