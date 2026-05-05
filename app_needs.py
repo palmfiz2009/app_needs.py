@@ -70,25 +70,38 @@ def alliance_analysis(title_list_str):
 # --- (以下、load_data, save_data, automated_scoutなどは前回と同じ) ---
 # ※ automated_scout内の alliance_analysis 呼び出し部分はそのまま使えます
 
-# --- 7. UI（微調整） ---
-tab1, tab2, tab3 = st.tabs(["📊 DB", "📡 自動スキャン", "🧠 AI連合コンサル"])
+# --- 7. UI構成 ---
+tab1, tab2, tab3 = st.tabs(["📊 知能データベース", "📡 全自動スキャン", "🧠 AI連合コンサル"])
 
-# (Tab 1, Tab 2 の内容は前回と同様)
+with tab1:
+    st.subheader("🗂️ 蓄積されたグローバル知見")
+    st.dataframe(load_data(), use_container_width=True)
 
-with tab3:
-    st.subheader("🎓 専門家相談")
-    if not HAS_OPENAI:
-        st.warning("⚠️ OpenAIのキーが設定されていないため、Geminiのみで動作します。")
-    # ...残りのコード
+with tab2:
+    st.subheader("🔭 AI連合による領域横断スキャン")
+    area = st.multiselect("監視対象", ["尿路結石", "癌 (UTUC/膀胱/前立腺)", "レーザー工学", "統計手法(ROC/PSM)"], default=["尿路結石", "癌 (UTUC/膀胱/前立腺)"])
+    
+    if st.button("全AIを起動して巡回開始"):
+        with st.spinner("Gemini と GPT-4o が並列思考中..."):
+            st.session_state.alliance_results = automated_scout(" OR ".join(area))
+            if st.session_state.alliance_results:
+                st.success("アライアンス解析が完了しました。")
+
+    if 'alliance_results' in st.session_state:
+        for i, res in enumerate(st.session_state.alliance_results):
+            with st.expander(f"📌 {res['Clinical_Need']}"):
+                st.write(res['Technical_Insight'])
+                if st.button("知財として登録", key=f"reg_{i}"):
+                    df = pd.concat([load_data(), pd.DataFrame([res])], ignore_index=True)
+                    save_data(df)
+                    st.toast("保存完了！")
 
 with tab3:
     st.subheader("🎓 専門家相談")
     
-    # OpenAIキーの確認メッセージ
     if not HAS_OPENAI:
         st.warning("⚠️ OpenAIのキーが設定されていないため、Geminiのみで動作します。")
         
-    # 👇 ここが抜け落ちていました！
     u_input = st.text_input("質問を入力（複数のAIが合議して答えます）:")
     if u_input:
         with st.spinner("AIアライアンスが議論中..."):
