@@ -80,3 +80,17 @@ with tab3:
     if not HAS_OPENAI:
         st.warning("⚠️ OpenAIのキーが設定されていないため、Geminiのみで動作します。")
     # ...残りのコード
+
+with tab3:
+    st.subheader("🎓 専門家相談")
+    
+    # OpenAIキーの確認メッセージ
+    if not HAS_OPENAI:
+        st.warning("⚠️ OpenAIのキーが設定されていないため、Geminiのみで動作します。")
+        
+    # 👇 ここが抜け落ちていました！
+    u_input = st.text_input("質問を入力（複数のAIが合議して答えます）:")
+    if u_input:
+        with st.spinner("AIアライアンスが議論中..."):
+            res = alliance_analysis(f"ユーザーの質問: {u_input}")
+            st.markdown(res)
