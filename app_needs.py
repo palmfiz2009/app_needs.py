@@ -25,6 +25,15 @@ model = genai.GenerativeModel('gemini-3-flash')
 
 DATA_FILE = 'medical_needs_data.csv'
 
+# モデル指定を 'models/' プレフィックス付きの最新版に変更
+try:
+    model = genai.GenerativeModel('models/gemini-3-flash')
+except Exception:
+    # 万が一上記で失敗した場合のバックアップ
+    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+DATA_FILE = 'medical_needs_data.csv'
+
 # AIからのコピー用セッション状態
 if 'draft_need' not in st.session_state:
     st.session_state.draft_need = ""
