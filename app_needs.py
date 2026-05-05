@@ -99,6 +99,46 @@ with tab3:
     st.write("蓄積された全知見に基づき、統計的・臨床的なアドバイスを行います。")
     db_text = load_data().to_string()
     user_input = st.text_input("質問例: AUAで注目されている、癌のコンソリデーション手術と結石の吸引圧管理の共通点は？")
+
+    import time  # 冒頭に追加
+
+def automated_scout(domain_query):
+    # 検索件数を一時的に5件に絞って安定性を高めます
+    full_query = f"({domain_query}) AND (2025:2026[pdat])"
+    handle = Entrez.esearch(db="pubmed", term=full_query, retmax=5) 
+    ids = Entrez.read(handle)["IdList"]
+    
+    results = []
+    for pmid in ids:
+        try:
+            summary = Entrez.read(Entrez.esummary(db="pubmed", id=pmid))[0]
+            title = summary['Title']
+            
+            # AI解析
+            analysis_prompt = f"""
+            あなたは泌尿器科のKOLかつ工学博士です。以下の情報を解析してください。
+            【医学的ニーズ】: 臨床現場での課題
+            【工学的ヒント】: デバイス等への応用
+            論文名: {title}
+            """
+            response = model.generate_content(analysis_prompt)
+            results.append({
+                'Date': datetime.date.today(),
+                'Source_Type': 'Academic/Congress',
+                'Reliability': 'High (PubMed Verified)',
+                'Clinical_Need': title,
+                'Technical_Insight': response.text,
+                'Source_Ref': f"PMID: {pmid}"
+            })
+            
+            # 💡 重要：APIの制限を避けるために1.5秒だけ待機
+            time.sleep(1.5)
+            
+        except Exception as e:
+            st.warning(f"PMID {pmid} の解析中にスキップが発生しました。")
+            continue
+            
+    return results
     
     if user_input:
         prompt = f"知識ベース:\n{db_text}\n\n質問: {user_input}\n\n泌尿器科医(MD)かつ工学博士(PhD)として回答してください。"
