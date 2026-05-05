@@ -4,10 +4,9 @@ import google.generativeai as genai
 from Bio import Entrez
 import datetime
 import os
-import time
 import json
 import re
-import openai  # 💡 冒頭に移動
+import openai
 
 # --- 1. ページ設定 ---
 st.set_page_config(page_title="Urology AI Alliance", layout="wide")
@@ -29,7 +28,24 @@ if "OPENAI_API_KEY" in st.secrets:
     except Exception as e:
         st.error(f"OpenAIの初期化に失敗しました: {e}")
 
-# --- 3. 解析エンジン（安定化版） ---
+# --- 3. データ管理関数 ---
+DATA_FILE = 'urology_intelligence_db.csv'
+
+def load_data():
+    columns = ['Date', 'Source_Type', 'Reliability', 'Clinical_Need', 'Technical_Insight', 'Source_Ref']
+    if os.path.exists(DATA_FILE):
+        df = pd.read_csv(DATA_FILE)
+        # 不足している列があればN/Aで埋める
+        for col in columns:
+            if col not in df.columns: 
+                df[col] = "N/A"
+        return df[columns]
+    return pd.DataFrame(columns=columns)
+
+def save_data(df):
+    df.to_csv(DATA_FILE, index=False)
+
+# --- 4. 解析エンジン（安定化版） ---
 def alliance_analysis(title_list_str):
     core_prompt = f"""
     あなたは泌尿器科医(MD)かつ工学博士(PhD)です。
@@ -48,7 +64,16 @@ def alliance_analysis(title_list_str):
     # 1. Geminiで試行
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(core_prompt)
+        # 安全フィルターを緩和して医学用語のブロックを防止
+        response = model.generate_content(
+            core_prompt,
+            safety_settings=[
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        )
         results_text = response.text
     except Exception as e:
         st.warning("Gemini制限中。GPT-4oへ切り替えます...")
@@ -59,7 +84,7 @@ def alliance_analysis(title_list_str):
             res_gpt = client_gpt.chat.completions.create(
                 model="gpt-4o",
                 messages=[{"role": "user", "content": core_prompt}],
-                timeout=30.0  # 💡 30秒でタイムアウトさせて「フリーズ」を防ぐ
+                timeout=30.0  # 30秒でタイムアウトさせて「フリーズ」を防ぐ
             )
             results_text = res_gpt.choices[0].message.content
         except Exception as e:
@@ -67,10 +92,47 @@ def alliance_analysis(title_list_str):
 
     return results_text
 
-# --- (以下、load_data, save_data, automated_scoutなどは前回と同じ) ---
-# ※ automated_scout内の alliance_analysis 呼び出し部分はそのまま使えます
+# --- 5. 自動スカウト関数 ---
+def automated_scout(domain_query):
+    # Entrezの警告を防ぐためのダミーメール
+    Entrez.email = "urology_intel_engine@example.com"
+    
+    # PubMed検索
+    full_query = f"({domain_query}) AND (2025:2026[pdat])"
+    handle = Entrez.esearch(db="pubmed", term=full_query, retmax=5)
+    ids = Entrez.read(handle)["IdList"]
+    if not ids: 
+        return []
 
-# --- 7. UI構成 ---
+    paper_list = []
+    for pmid in ids:
+        summary = Entrez.read(Entrez.esummary(db="pubmed", id=pmid))[0]
+        paper_list.append(f"PMID:{pmid} | {summary['Title']}")
+    
+    # アライアンス解析実行
+    response_text = alliance_analysis("\n".join(paper_list))
+    
+    final_results = []
+    if response_text:
+        # AIの回答からJSON部分だけを抜き出す
+        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if json_match:
+            try:
+                raw_json = json.loads(json_match.group())
+                for r in raw_json:
+                    final_results.append({
+                        'Date': datetime.date.today(),
+                        'Source_Type': 'Alliance Intelligence',
+                        'Reliability': 'High (Gemini+GPT)',
+                        'Clinical_Need': r.get('Clinical_Need', 'N/A'),
+                        'Technical_Insight': r.get('Technical_Insight', 'N/A'),
+                        'Source_Ref': r.get('Source_Ref', 'N/A')
+                    })
+            except Exception as e:
+                st.error("AIの回答形式を読み取れませんでした。")
+    return final_results
+
+# --- 6. UI構成 ---
 tab1, tab2, tab3 = st.tabs(["📊 知能データベース", "📡 全自動スキャン", "🧠 AI連合コンサル"])
 
 with tab1:
@@ -86,6 +148,8 @@ with tab2:
             st.session_state.alliance_results = automated_scout(" OR ".join(area))
             if st.session_state.alliance_results:
                 st.success("アライアンス解析が完了しました。")
+            else:
+                st.warning("情報を抽出できませんでした。")
 
     if 'alliance_results' in st.session_state:
         for i, res in enumerate(st.session_state.alliance_results):
