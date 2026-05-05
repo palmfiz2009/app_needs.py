@@ -11,26 +11,27 @@ st.set_page_config(page_title="MedTech Needs Tracker", layout="wide")
 # --- 2. API・ファイル設定 ---
 Entrez.email = "yoshida.tks@kmu.ac.jp" 
 
-# APIキーをSecretsから読み込む
+# --- 2. API・ファイル設定 ---
+Entrez.email = "t-yoshida@kmu.ac.jp" 
+
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
     st.error("エラー: Streamlit Cloudの Settings -> Secrets に GEMINI_API_KEY を設定してください。")
 
-# # --- 修正前 ---
-# model = genai.GenerativeModel('gemini-1.5-flash') 
-
-# --- 修正後：2026年現在の標準モデル名に更新 ---
-model = genai.GenerativeModel('gemini-3-flash')
-
-DATA_FILE = 'medical_needs_data.csv'
-
-# モデル指定を 'models/' プレフィックス付きの最新版に変更
+# ★モデル名を推測するのをやめ、サーバーから自動取得する★
 try:
-    model = genai.GenerativeModel('models/gemini-3-flash')
-except Exception:
-    # 万が一上記で失敗した場合のバックアップ
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    # 現在のAPIキーで利用可能な（文章生成ができる）全モデルのリストを取得
+    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+    
+    if available_models:
+        # 高速な 'flash' モデルがあればそれを優先、なければリストの先頭を使う
+        target_model_name = next((m for m in available_models if "flash" in m), available_models[0])
+        model = genai.GenerativeModel(target_model_name)
+    else:
+        st.error("このAPIキーで利用可能なAIモデルが見つかりません。")
+except Exception as e:
+    st.error(f"AIサーバーへの接続エラーが発生しました: {e}")
 
 DATA_FILE = 'medical_needs_data.csv'
 
